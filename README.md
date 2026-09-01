@@ -66,10 +66,6 @@ clang++ -std=c++23 -Wall -Wextra main.cc \
 the required dependency include paths or libraries, so the direct compiler
 command is the more accurate description of the current build setup.
 
-The source also has an outstanding compile issue: `shi::init()` calls
-`createMetadata()` without the argument required by its current declaration.
-This must be resolved before a clean build is possible.
-
 ## Current usage
 
 Once the prototype builds, pass a command placeholder followed by a file path:
@@ -80,8 +76,7 @@ Once the prototype builds, pass a command placeholder followed by a file path:
 
 The program initializes `.shi/objects` in the current directory and attempts
 to add `path/to/file`. A successful add writes a compressed blob and prints a
-success message. The file must exist and be a regular file. Do not omit the
-file argument; argument validation is not implemented yet.
+success message. The file must exist and be a regular file.
 
 ## Source tree
 
@@ -108,3 +103,6 @@ compile.py       Draft local compile helper
 ## License
 
 No license has been specified yet.
+
+## Note
+This README file is written and maintained by AI. The code is by human hands, eyes, and sweaty hands.
