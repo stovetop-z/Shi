@@ -1,12 +1,13 @@
 #pragma once
 #include <filesystem>
+#include <string_view>
 #include <boost/process/v1.hpp>
 #include <vector>
 #include <string>
 
 constexpr std::string_view dest = "steven@100.98.23.73:/home/steven/projects";
 
-namespace sync
+namespace rsync
 {
     namespace bp = boost::process::v1;
     namespace fs = std::filesystem;
@@ -16,7 +17,7 @@ namespace sync
         std::string source = fs::absolute(file).string();
         std::string remote_dest = std::string(dest) + "/" + project_name + "/" + file.string();
         
-        int res = bp::system(bp::search_path("rsync"), "-avz", "e", "ssh", source, remote_dest);
+        int res = bp::system(bp::search_path("rsync"), "-avz", "-e", "ssh", source, remote_dest);
         if(res == 0) return false;
         
         return true;
@@ -33,9 +34,9 @@ namespace sync
             source += fs::absolute(file).string() + " ";
             remote_dest_files += remote_dest + file.string() + " ";
         }
-        int res = bp::system(bp::search_path("rsync"), "-avz", "e", "ssh", source, remote_dest_files);
+        int res = bp::system(bp::search_path("rsync"), "-avz", "-e", "ssh", source, remote_dest_files);
         if(res == 0) return false;
-        
+
         return true;
     }
 };

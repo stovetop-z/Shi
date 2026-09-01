@@ -1,7 +1,12 @@
 #pragma once
-#include <sstream>
+#include <algorithm>
+#include <ios>
+#include <bit>
+#include <cstdint>
 #include <cstddef>
 #include <fstream>
+#include <limits>
+#include <sstream>
 #include <openssl/sha.h>
 #include <zlib.h>
 #include <chrono>
@@ -17,13 +22,20 @@ namespace shi
     constexpr std::string_view SHI_DIR = ".shi";
     constexpr std::string_view SHI_OBJECTS_DIR = ".shi/objects";
     constexpr std::string_view SHI_TREE_PATH = ".shi/_shi_tree.txt";
+    constexpr std::string_view SHI_STAGING_PATH = ".shi/index/staging.bin";
+    std::vector<Byte> TREE_TYPE = {'t', 'r', 'e', 'e'};
+    std::vector<Byte> BLOB_TYPE = {'b', 'l', 'o', 'b'};
+    constexpr char PATH_DELIMITER = '/';
+    constexpr char ARG_DELIMITER = ' ';
+    constexpr bool is_big_endian = std::endian::native == std::endian::big;  // C++20
 
     using namespace args; 
 
     struct File
     {
         fs::path file_path;
-        int size;
+        std::uintmax_t size{};
+        Byte mod{};
         std::vector<Byte> raw_content;
     };
 
@@ -31,23 +43,37 @@ namespace shi
     {
         fs::path shi_path;
         File src_file;
-        std::string blob_raw;
-        std::string blob_hash;
-        std::string type;
+        std::vector<Byte> blob_raw;
+        std::vector<Byte> blob_hash;
+        std::vector<Byte> type;
+    };
+
+    struct Stage
+    {
+        std::uint16_t mod{};
+        std::int64_t mtime{};
+        std::vector<Byte> hash;
+        std::vector<Byte> path;
     };
 
     struct TreeShi
     {
         std::vector<Shi*> shis;
-        std::string branch;
+        std::vector<Byte> branch;
     };
 
     struct HashRes
     {
         std::string dir;
-        std::string file_hash;
-        std::string full_hash;
+        std::vector<Byte> file_hash;
+        std::vector<Byte> full_hash;
     };
+
+    inline std::vector<Byte> pathToBytes(const fs::path& path)
+    {
+        const auto& str = path.string();
+        return std::vector<Byte>(str.begin(), str.end());
+    }
 
     std::string inline hashToString(const Byte* hash, size_t length)
     {
@@ -57,18 +83,48 @@ namespace shi
         return ss.str();
     }
 
-    inline HashRes sha256(const std::string& to_hash) 
+    std::string inline hashToString(const std::vector<Byte>& hash)
+    {
+        std::ostringstream ss;
+        for(size_t i = 0; i < hash.size(); i++)
+            ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
+        return ss.str();
+    }
+
+
+    inline HashRes sha256(const std::vector<Byte>& to_hash) 
     {
         unsigned char shaed[SHA256_DIGEST_LENGTH];
-        SHA256((const unsigned char*)to_hash.c_str(), to_hash.length(), shaed);
+        SHA256(reinterpret_cast<const unsigned char*>(to_hash.data()), to_hash.size(), shaed);
         
-        std::string full_hash = hashToString(shaed, SHA256_DIGEST_LENGTH);
+        std::string dir_hash = hashToString(shaed, 2);
 
         return HashRes{
-            .dir = full_hash.substr(0, 2),
-            .file_hash = full_hash.substr(2, SHA256_DIGEST_LENGTH - 2),
-            .full_hash = full_hash
+            .dir = dir_hash,
+            .file_hash = {shaed + 2, shaed + SHA256_DIGEST_LENGTH},
+            .full_hash = {shaed, shaed + SHA256_DIGEST_LENGTH}
         };
+    }
+
+    inline std::vector<Byte> readFile(std::istream& is)
+    {   
+        is.seekg(0, std::ios::end);
+        const std::streampos end = is.tellg();
+        if(end < 0 || end > std::numeric_limits<std::streamsize>::max()) return {};
+
+        const std::streamsize size = static_cast<std::streamsize>(end);
+        is.seekg(0, std::ios::beg);
+        std::vector<Byte> content(size);
+
+        if(size == 0) return content;
+
+        is.read(reinterpret_cast<char*>(content.data()), size);
+        if(is.gcount() != size)
+        {
+            logger::log(logger::level::ERROR, "Failed to read the complete file.");
+            return {};
+        }
+        return content;
     }
 
     inline File getFile(const fs::path& f)
@@ -77,15 +133,26 @@ namespace shi
 
         File new_file;
         new_file.file_path = f;
-        new_file.size = fs::file_size(f);
-        
-        std::ifstream open_file(f);
-        std::stringstream buff;
-        buff << open_file.rdbuf();
-        open_file.close();
 
-        std::string content = buff.str();
-        new_file.raw_content = std::vector<Byte>(content.begin(), content.end());
+        std::error_code ec;
+        new_file.size = fs::file_size(f, ec);
+        if(ec || new_file.size > std::numeric_limits<std::size_t>::max() || new_file.size > static_cast<std::uintmax_t>(std::numeric_limits<std::streamsize>::max()))
+        {
+            return File();
+        }
+        
+        std::ifstream open_file(f, std::ios::binary);
+        if (!open_file.is_open()) return File(); 
+
+        // Pre allocate vector size directly to prevent copying loops
+        const auto content_size = static_cast<std::size_t>(new_file.size);
+        new_file.raw_content = readFile(open_file);
+
+        if(new_file.raw_content.size() != content_size)
+        {
+            return File();
+        }
+        
         return new_file;
     }
 
@@ -96,13 +163,20 @@ namespace shi
 
     inline std::vector<Byte> compressShi(const std::vector<Byte>& data)
     {
-        if(data.empty()) return {};
+        if(data.size() > std::numeric_limits<uLong>::max())
+        {
+            logger::log(logger::level::ERROR, "Input is too large for the zlib API.");
+            return {};
+        }
 
         uLong src_len = static_cast<uLong>(data.size());
         uLongf dest_len = compressBound(src_len);
         std::vector<Byte> dest(dest_len);
 
-        int res = compress(dest.data(), &dest_len, data.data(), src_len);
+        // Keep a non-null source pointer even for an empty input vector.
+        const Byte empty = 0;
+        const Byte* source = data.empty() ? &empty : data.data();
+        int res = compress(dest.data(), &dest_len, source, src_len);
         if(res != Z_OK)
         {
             logger::log(
@@ -117,6 +191,13 @@ namespace shi
         return dest;
     }
 
+    /*
+    * Name: createBlobFile
+    * Description: Creates a blob file for the given Shi object
+    * Parameters:
+    *   blob_obj: The Shi object for which to create a blob file
+    * Returns: True if the blob file was created successfully, false otherwise
+    */
     inline bool createBlobFile(const Shi& blob_obj)
     {
         const fs::path& shi_path = blob_obj.shi_path;
@@ -153,7 +234,8 @@ namespace shi
         const auto& raw_content = blob_obj.src_file.raw_content;
         std::vector<Byte> compressed_data = compressShi(raw_content);
         
-        if(!raw_content.empty() && compressed_data.empty())
+        // Even an empty source file produces a non-empty zlib stream.
+        if(compressed_data.empty())
         {
             logger::log(logger::level::ERROR, logger::msgFormat("Aborting blob creation due to compression error on: " + shi_path.string(), __FUNCTION__, __FILE__, __LINE__));
             return false;
@@ -167,30 +249,140 @@ namespace shi
             return false;
         }
 
-        if(!compressed_data.empty())
+        blob_file.write(reinterpret_cast<const char*>(compressed_data.data()),
+                        static_cast<std::streamsize>(compressed_data.size()));
+        if(!blob_file)
         {
-            blob_file.write(reinterpret_cast<const char*>(compressed_data.data()), static_cast<std::streamsize>(compressed_data.size()));
+            logger::log(logger::level::ERROR, logger::msgFormat("Failed while writing blob file: " + shi_path.string(), __FUNCTION__, __FILE__, __LINE__));
+            return false;
         }
-        
+
         blob_file.close();
+        if(!blob_file)
+        {
+            logger::log(logger::level::ERROR, logger::msgFormat("Failed while closing blob file: " + shi_path.string(), __FUNCTION__, __FILE__, __LINE__));
+            return false;
+        }
 
         logger::log(logger::level::INFO, "Successfully created blob file at: " + shi_path.string());
         return true;
     }
 
-    inline bool addToTree(Shi* shi)
+    inline bool commit(const Shi& shi, const std::string&& branch)
     {
-        
+        std::string tree_path = branch + std::string(SHI_TREE_PATH);
+        std::fstream tree_file(tree_path);
+
+        (void)shi;
+        (void)branch;
+        return false;
     }
- 
+
+    inline bool stage(const Shi& shi)
+    {
+        std::vector<Stage> staging_data;
+
+        // Read the staging file
+        std::ifstream staging_input(SHI_STAGING_PATH, std::ios::binary);
+        while(staging_input)
+        {
+            Stage stage;
+            std::uint32_t hash_size{};
+            std::uint32_t path_size{};
+
+            if(!staging_input.read(reinterpret_cast<char*>(&stage.mod), sizeof(stage.mod)) ||
+               !staging_input.read(reinterpret_cast<char*>(&stage.mtime), sizeof(stage.mtime)) ||
+               !staging_input.read(reinterpret_cast<char*>(&hash_size), sizeof(hash_size)) ||
+               !staging_input.read(reinterpret_cast<char*>(&path_size), sizeof(path_size)))
+            {
+                break;
+            }
+
+            stage.hash.resize(hash_size);
+            stage.path.resize(path_size);
+            if(!staging_input.read(reinterpret_cast<char*>(stage.hash.data()), hash_size) ||
+               !staging_input.read(reinterpret_cast<char*>(stage.path.data()), path_size))
+            {
+                logger::log(logger::level::ERROR, "Staging file contains an incomplete record.");
+                return false;
+            }
+            staging_data.push_back(stage);
+        }
+        staging_input.close();
+
+        // Check for duplicates and add shi data
+        const auto it = std::find_if(staging_data.begin(), staging_data.end(), [&shi](const Stage& s) {
+            return s.hash == shi.blob_hash;
+        });
+
+        if(it != staging_data.end())
+        {
+            logger::log(logger::level::INFO, "Stage already exists for: " + hashToString(shi.blob_hash));
+            return true;
+        }
+
+        auto modFs = fs::status(shi.src_file.file_path);
+        std::uint16_t mod = modFs.type() == fs::file_type::regular ? 0644 : 0755;
+        auto mtimeFs = fs::last_write_time(shi.src_file.file_path);
+        std::int64_t mtime = static_cast<std::int64_t>(mtimeFs.time_since_epoch().count());
+
+
+        staging_data.push_back(Stage{
+            .mod = mod,
+            .mtime = mtime,
+            .hash = shi.blob_hash,
+            .path = pathToBytes(shi.src_file.file_path)
+        });
+
+        // Write to staging file
+        std::ofstream staging_file(SHI_STAGING_PATH, std::ios::binary | std::ios::trunc);
+        if(!staging_file.is_open())
+        {
+            logger::log(logger::level::ERROR, "Failed to open staging file for writing.");
+            return false;
+        }
+
+        for(const auto& stage : staging_data)
+        {
+            if(stage.hash.size() > std::numeric_limits<std::uint32_t>::max() ||
+               stage.path.size() > std::numeric_limits<std::uint32_t>::max())
+            {
+                logger::log(logger::level::ERROR, "Staging record is too large.");
+                return false;
+            }
+
+            const auto hash_size = static_cast<std::uint32_t>(stage.hash.size());
+            const auto path_size = static_cast<std::uint32_t>(stage.path.size());
+            staging_file.write(reinterpret_cast<const char*>(&stage.mod), sizeof(stage.mod));
+            staging_file.write(reinterpret_cast<const char*>(&stage.mtime), sizeof(stage.mtime));
+            staging_file.write(reinterpret_cast<const char*>(&hash_size), sizeof(hash_size));
+            staging_file.write(reinterpret_cast<const char*>(&path_size), sizeof(path_size));
+            staging_file.write(reinterpret_cast<const char*>(stage.hash.data()), hash_size);
+            staging_file.write(reinterpret_cast<const char*>(stage.path.data()), path_size);
+        }
+        if(!staging_file)
+        {
+            logger::log(logger::level::ERROR, "Failed while writing staging file.");
+            return false;
+        }
+        staging_file.close();
+
+        return true;
+    }
+
     Shi blobbify(const fs::path& p)
     {
-        File f = getFile(p);
         Shi blob_obj;
+        File f;
+        
+        f = getFile(p);
+        logger::log(logger::level::INFO, "Creating blob for: " + f.file_path.string());
+
         blob_obj.src_file = f;
 
-        // Construct object header: "blob <size>\0<content>"
-        std::string header = "blob " + std::to_string(f.size) + '\0';
+        blob_obj.type = fs::is_directory(p) ? TREE_TYPE : BLOB_TYPE;
+        std::string header(blob_obj.type.begin(), blob_obj.type.end());
+        header += std::to_string(f.size) + '\0';
 
         blob_obj.blob_raw.reserve(header.size() + f.raw_content.size());
         blob_obj.blob_raw.insert(blob_obj.blob_raw.end(), header.begin(), header.end());
@@ -198,29 +390,30 @@ namespace shi
 
         HashRes hash_res = sha256(blob_obj.blob_raw);
         blob_obj.blob_hash = hash_res.full_hash;
-        blob_obj.shi_path = fs::path(SHI_OBJECTS_DIR) / hash_res.dir / hash_res.file_hash;
-
-        // We need to add to the tree file
-        addToTree(&blob_obj);
+        blob_obj.shi_path = fs::path(SHI_OBJECTS_DIR) / hash_res.dir / hashToString(hash_res.file_hash);
         
         return blob_obj;
     }
 
-    inline bool createTree(const std::string&& branch)
+    inline bool createTree(const std::string& branch)
     {
+        (void)branch;
+        const fs::path shi_tree = fs::path(SHI_TREE_PATH);
+        std::ofstream file(shi_tree);
+        if(!file.is_open())
+        {
+            logger::log(logger::level::ERROR, logger::msgFormat("Failed to open tree file: " + shi_tree.string(), __FUNCTION__, __FILE__, __LINE__));
+            return false;
+        }
 
-    }
-
-    inline bool createMetadata(fs::path* p)
-    {
-        fs::path paths = *p;
-
-
-        std::ifstream file(".mtd");
+        logger::log(logger::level::INFO, "Creating tree file: " + shi_tree.string());
+        file.close();
+        return true;
     }
 
     bool init(const std::string& arg = "")
     {
+        logger::log(logger::level::INFO, "Initializing .shi directory.");
         // 1. Check if argument is empty
         if(arg.empty()) 
         {
@@ -234,6 +427,7 @@ namespace shi
         // 2. Resolve path using arg if intended (or use current_path if empty)
         fs::path base_path = arg;
         fs::path init_path = base_path / SHI_OBJECTS_DIR;
+        fs::path staging_dir = base_path / fs::path(SHI_STAGING_PATH).parent_path();
 
 
         // 3. Create directories with error_code to avoid uncaught exceptions
@@ -251,12 +445,16 @@ namespace shi
             );
             return false;
         }
+
+        fs::create_directories(staging_dir, ec);
+        if(ec)
+        {
+            logger::log(logger::level::ERROR, logger::msgFormat("Failed to create staging directory: " + staging_dir.string() + " (Error: " + ec.message() + ")", __FUNCTION__, __FILE__, __LINE__));
+            return false;
+        }
         
-        logger::log(logger::level::INFO, "Successfully initialized .shi directory at: " + init_path.string());
-
-        createMetadata();
-
         createTree("master");
+        logger::log(logger::level::INFO, "Successfully initialized .shi directory at: " + init_path.string());
 
         return true;
     }
@@ -274,14 +472,34 @@ namespace shi
             // Recursive search of files in parent to all children files excluding the .shi folder
         }
 
-        Shi shi = blobbify(arg);
-        return createBlobFile(shi);
+        // `arg` is already one command-line argument, so do not split it on
+        // spaces; filenames containing spaces are valid paths.
+        std::vector<fs::path> paths{fs::relative(fs::path(arg))};
+
+        for(const auto& path : paths)
+        {
+            if(!fs::is_regular_file(path))
+            {
+                logger::log(logger::level::ERROR, logger::msgFormat("Path is not a regular file: " + path.string(), __FUNCTION__, __FILE__, __LINE__));
+                return false;
+            }
+
+            Shi shi = blobbify(path);
+            if(!createBlobFile(shi))
+            {
+                logger::log(logger::level::ERROR, logger::msgFormat("Failed to create blob file for path: " + path.string(), __FUNCTION__, __FILE__, __LINE__));
+                return false;
+            }
+            stage(shi);
+        }
+
+        return true;
     }
 
     bool sync(std::string project_name, const std::vector<std::string>& args)
     {
         std::vector<fs::path> files_to_sync(args.begin(), args.end());
-        if(sync::rsync(project_name, files_to_sync))
+        if(rsync::rsync(project_name, files_to_sync))
         {
             logger::log(logger::level::ERROR, logger::msgFormat("Failed to sync files to remote destination.", __FUNCTION__, __FILE__, __LINE__));
             return false;
