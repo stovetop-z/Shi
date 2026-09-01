@@ -105,4 +105,4 @@ compile.py       Draft local compile helper
 No license has been specified yet.
 
 ## Note
-This README file is written and maintained by AI. The code is by human hands, eyes, and sweaty hands.
+This README file is written and maintained by AI. The code is by human brain, eyes, and sweaty hands.
