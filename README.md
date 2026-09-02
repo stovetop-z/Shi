@@ -1,108 +1,148 @@
 # shi
 
-`shi` is a small, Git-inspired content-addressable file store written in C++23.
-It is an experimental project for learning how a version-control-style object
-database can represent files as compressed blobs addressed by their SHA-256
-content hash.
+`shi` is a small, Git-inspired content-addressable file store written in
+C++23. It reads files as binary data, builds blob objects with a SHA-256
+content hash, compresses them with zlib, and stores them in a local `.shi`
+repository.
 
-## Project status
+## Status
 
-This repository is a prototype, not yet a usable version-control system. The
-implemented path is currently:
+`shi` is an experimental project. The current executable supports initializing
+a repository, adding individual files, inspecting the staging file, and
+synchronizing staged paths with a remote server over SSH/rsync. Commit and
+tree history support is not implemented yet.
 
-1. initialize `.shi/objects`;
-2. read a regular file;
-3. create a `blob <size>\0<content>` object representation;
-4. hash it with SHA-256; and
-5. zlib-compress and write the blob beneath `.shi/objects/<2-char-prefix>/`.
+## Requirements
 
-Tree creation, metadata, recursive directory adds, commits, history, and most
-of the declared commands are still placeholders. The command-line dispatcher
-is also not implemented yet; the current executable always initializes the
-current directory and treats the third argument as the file to add.
+- C++23 compiler
+- CMake 3.10 or newer
+- OpenSSL (`libcrypto`) for SHA-256
+- zlib for compression
+- Boost.Process and Boost.Filesystem for synchronization
+- `rsync`, SSH access, and a configured remote destination for `sync`
 
-## Object layout
+On macOS with Homebrew, the project expects dependencies under `/opt/homebrew`.
 
-Initializing a project is intended to produce this structure:
+## Build
+
+Using CMake:
+
+```sh
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/opt/homebrew
+cmake --build build
+```
+
+The executable is created at `build/shi`.
+
+There is also a local Python build helper:
+
+```sh
+python3 compile.py
+```
+
+It creates `shi.out` and uses the Homebrew library paths listed in
+`compile.py`. Adjust those paths if your compiler or dependencies are
+installed elsewhere.
+
+## Usage
+
+Initialize a repository in the current directory:
+
+```sh
+./build/shi init
+```
+
+Add one regular file:
+
+```sh
+./build/shi add path/to/file
+```
+
+Paths containing spaces are supported when quoted:
+
+```sh
+./build/shi add "path/to/my file.txt"
+```
+
+Display the current staging records:
+
+```sh
+./build/shi cat-stage
+```
+
+Synchronize staged file paths:
+
+```sh
+./build/shi sync shi
+```
+
+The `sync` command currently sends files to:
+
+```text
+steven@100.98.23.73:projects/<project_name>/
+```
+
+This destination is hard-coded in `include/sync.h` and should be changed for
+another server or project layout.
+
+## SSH authentication
+
+Configure SSH public-key authentication so `rsync` does not require the
+account password on every run. For example:
+
+```sh
+ssh-keygen -t ed25519 -C "shi-sync"
+ssh-copy-id -i ~/.ssh/id_ed25519.pub steven@100.98.23.73
+ssh steven@100.98.23.73
+```
+
+On macOS, `ssh-add --apple-use-keychain ~/.ssh/id_ed25519` can keep a
+passphrase-protected key available through the Keychain.
+
+## Repository layout
+
+After initialization, the repository contains:
 
 ```text
 .shi/
 ├── objects/
-│   └── <sha256-prefix>/
-│       └── <remaining-sha256>
-├── _shi_tree.txt       # planned; not implemented
-└── ...                 # planned metadata
+│   └── <2-byte SHA-256 prefix>/
+│       └── <remaining SHA-256 digest>
+├── index/
+│   └── staging.bin
+└── _shi_tree.txt
 ```
 
-Blob IDs are SHA-256 values of the blob representation, including its header.
-The first two hexadecimal characters select the objects subdirectory and the
-remaining characters are the object filename. Existing blobs are left intact,
-so adding identical content is naturally deduplicated.
+Blob data is represented as:
 
-## Requirements
-
-- macOS with Homebrew paths, or equivalent development libraries
-- C++23 compiler
-- OpenSSL (SHA-256)
-- zlib (compression)
-- Boost.Process and Boost.System (the sync prototype)
-- `rsync` and SSH, only for the unfinished sync functionality
-
-## Building
-
-The checked-in `compile.py` is intended to compile with Clang and Homebrew's
-OpenSSL installation, but it currently needs correction (`os.subprocess` is not
-a Python API). The command it is trying to run can be invoked directly after
-adjusting library/include paths for the local machine:
-
-```sh
-clang++ -std=c++23 -Wall -Wextra main.cc \
-  -I/opt/homebrew/opt/openssl@3/include \
-  -L/opt/homebrew/opt/openssl@3/lib \
-  -lcrypto -lz -lssh -lboost_system -o shi
+```text
+<type><file-size>\0<raw-file-content>
 ```
 
-`CMakeLists.txt` currently declares the executable but does not yet configure
-the required dependency include paths or libraries, so the direct compiler
-command is the more accurate description of the current build setup.
+The representation is hashed with SHA-256. The compressed blob is stored under
+`.shi/objects`, using the first two hexadecimal digest characters as a
+directory prefix. Adding identical content reuses the existing object path.
 
-## Current usage
-
-Once the prototype builds, pass a command placeholder followed by a file path:
-
-```sh
-./shi add path/to/file
-```
-
-The program initializes `.shi/objects` in the current directory and attempts
-to add `path/to/file`. A successful add writes a compressed blob and prints a
-success message. The file must exist and be a regular file.
+The staging file records file metadata, the binary blob hash, and the file
+path. Its format is currently an internal implementation detail and may change.
 
 ## Source tree
 
 ```text
-main.cc          Minimal current executable entry point
-include/shi.h    Initialization, hashing, compression, and blob storage
-include/sync.h   Experimental rsync-over-SSH helpers
-include/logger.h Small console logger
-include/arguments.h  Planned command/flag lexer
-CMakeLists.txt   Initial CMake target
-compile.py       Draft local compile helper
+main.cc                         Command-line entry point
+include/shi.h                   Repository, blob, staging, and sync orchestration
+include/sync.h                  Boost.Process rsync wrapper
+include/argument_handler/       Argument parsing helpers
+include/common/                 Shared utilities and logging
+CMakeLists.txt                  CMake build configuration
+compile.py                      macOS/Clang build helper
 ```
 
 ## Roadmap
 
-- implement safe command-line parsing and dispatch;
-- finish metadata and tree objects;
-- add commit, log, checkout/read, compare, pull, and push operations;
-- support recursive adds while excluding `.shi`;
-- make paths repository-relative and configurable;
-- configure dependencies correctly in CMake; and
-- add tests for hashing, compression, object layout, and error handling.
-
-## License
-
-No license has been specified yet.
-
-## Note
-This README file is written and maintained by AI. The code is by human brain, eyes, and sweaty hands.
+- implement recursive `add .` while excluding `.shi`;
+- finish tree objects and commits;
+- add history, checkout/read, compare, pull, and push commands;
+- make the remote destination configurable;
+- improve staging-file portability and version its format; and
+- add automated tests for hashing, compression, staging, and synchronization.
