@@ -65,14 +65,14 @@ namespace shi
 
     /*
      * Name: bytesToPath
-     * Description: Converts a null-terminated byte vector into a filesystem path
+     * Description: Converts a byte vector containing path text into a filesystem path
      * Parameters:
      *   bytes: The byte vector containing the path text
      * Returns: The filesystem path represented by bytes
      */
     inline fs::path bytesToPath(const std::vector<Byte>& bytes)
     {
-        return fs::path(reinterpret_cast<const char*>(bytes.data()));
+        return fs::path(std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
     }
 
     /*
@@ -357,6 +357,8 @@ namespace shi
      */
     inline void readStagingFile(std::vector<Stage>& staging_data)
     {
+        staging_data.clear();
+
         // Read the staging file
         std::ifstream staging_input(SHI_STAGING_PATH, std::ios::binary);
         while(staging_input)
@@ -375,6 +377,12 @@ namespace shi
                 break;
             }
 
+            if(hash_size > staging_data.max_size() || path_size > staging_data.max_size())
+            {
+                logger::log(logger::level::ERROR, "Staging file contains an invalid record size.");
+                return;
+            }
+
             stage.hash.resize(hash_size);
             stage.path.resize(path_size);
             stage.flag = flag;
@@ -382,6 +390,7 @@ namespace shi
                !staging_input.read(reinterpret_cast<char*>(stage.path.data()), path_size))
             {
                 logger::log(logger::level::ERROR, "Staging file contains an incomplete record.");
+                return;
             }
             staging_data.push_back(stage);
         }
@@ -448,6 +457,7 @@ namespace shi
             staging_file.write(reinterpret_cast<const char*>(&stage.mtime), sizeof(stage.mtime));
             staging_file.write(reinterpret_cast<const char*>(&hash_size), sizeof(hash_size));
             staging_file.write(reinterpret_cast<const char*>(&path_size), sizeof(path_size));
+            staging_file.write(reinterpret_cast<const char*>(&stage.flag), sizeof(stage.flag));
             staging_file.write(reinterpret_cast<const char*>(stage.hash.data()), hash_size);
             staging_file.write(reinterpret_cast<const char*>(stage.path.data()), path_size);
         }
@@ -477,7 +487,8 @@ namespace shi
         {
             auto mtime = stage.mtime;
 
-            oss << stage.mod << " " << mtime << " " << hashToString(stage.hash) << " " << bytesToPath(stage.path).string() << std::endl;
+            oss << stage.mod << " " << mtime << " " << static_cast<unsigned int>(stage.flag)
+                << " " << hashToString(stage.hash) << " " << bytesToPath(stage.path).string() << std::endl;
         }
         return oss.str();
     }
