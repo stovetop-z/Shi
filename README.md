@@ -40,7 +40,7 @@ There is also a local Python build helper:
 python3 compile.py
 ```
 
-It creates `shi.out` and uses the Homebrew library paths listed in
+It creates `bin/shi` and uses the Homebrew library paths listed in
 `compile.py`. Adjust those paths if your compiler or dependencies are
 installed elsewhere.
 
