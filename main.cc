@@ -29,6 +29,7 @@ namespace
 
 int main(int argc, char** argv)
 {
+    readEnvFile(".env", env);
     const char* program = argc > 0 ? argv[0] : "shi";
 
     if(argc < 2)
@@ -50,7 +51,7 @@ int main(int argc, char** argv)
         if(command == "init")
         {
             if(!hasArgumentCount(argc, 2, program, command)) return 2;
-            return shi::init(".") ? 0 : 1;
+            return shi::init() ? 0 : 1;
         }
 
         if(command == "add")
