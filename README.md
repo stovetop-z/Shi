@@ -32,7 +32,7 @@ cmake -S . -B build -DCMAKE_PREFIX_PATH=/opt/homebrew
 cmake --build build
 ```
 
-The executable is created at `build/shi`.
+The executable is created at `build/bin/shi`.
 
 There is also a local Python build helper:
 
@@ -49,31 +49,31 @@ installed elsewhere.
 Initialize a repository in the current directory:
 
 ```sh
-./build/shi init
+./build/bin/shi init
 ```
 
 Add one regular file:
 
 ```sh
-./build/shi add path/to/file
+./build/bin/shi add path/to/file
 ```
 
 Paths containing spaces are supported when quoted:
 
 ```sh
-./build/shi add "path/to/my file.txt"
+./build/bin/shi add "path/to/my file.txt"
 ```
 
 Display the current staging records:
 
 ```sh
-./build/shi cat-stage
+./build/bin/shi cat-stage
 ```
 
 Synchronize staged file paths:
 
 ```sh
-./build/shi sync shi
+./build/bin/shi sync shi
 ```
 
 The `sync` command currently sends files to:

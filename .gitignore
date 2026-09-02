@@ -2,4 +2,4 @@
 build/
 .shi/
 *.out
-shi
+bin/

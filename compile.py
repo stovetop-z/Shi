@@ -17,7 +17,7 @@ compile_cmd = [
     "-lboost_filesystem",
     "-lboost_process", 
     "-o", 
-    "shi.out"
+    "bin/shi"
 ]
 
 try:
