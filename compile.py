@@ -14,7 +14,8 @@ compile_cmd = [
     "-lcrypto", 
     "-lz", 
     "-lssh", 
-    "-lboost_filesystem", 
+    "-lboost_filesystem",
+    "-lboost_process", 
     "-o", 
     "shi.out"
 ]

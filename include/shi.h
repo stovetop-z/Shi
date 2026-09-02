@@ -6,13 +6,8 @@
 #include <cstddef>
 #include <fstream>
 #include <limits>
-#include <sstream>
-#include <format>
 #include <openssl/sha.h>
 #include <zlib.h>
-#include <chrono>
-#include "logger.h"
-#include "arguments.h"
 #include "sync.h"
 
 namespace shi
@@ -28,9 +23,6 @@ namespace shi
     std::vector<Byte> BLOB_TYPE = {'b', 'l', 'o', 'b'};
     constexpr char PATH_DELIMITER = '/';
     constexpr char ARG_DELIMITER = ' ';
-    constexpr bool is_big_endian = std::endian::native == std::endian::big;  
-
-    using namespace args; 
 
     struct File
     {
@@ -71,17 +63,39 @@ namespace shi
         std::vector<Byte> full_hash;
     };
 
+    /*
+     * Name: bytesToPath
+     * Description: Converts a null-terminated byte vector into a filesystem path
+     * Parameters:
+     *   bytes: The byte vector containing the path text
+     * Returns: The filesystem path represented by bytes
+     */
     inline fs::path bytesToPath(const std::vector<Byte>& bytes)
     {
         return fs::path(reinterpret_cast<const char*>(bytes.data()));
     }
 
+    /*
+     * Name: pathToBytes
+     * Description: Converts a filesystem path into a byte vector
+     * Parameters:
+     *   path: The filesystem path to convert
+     * Returns: The path text represented as bytes
+     */
     inline std::vector<Byte> pathToBytes(const fs::path& path)
     {
         const auto& str = path.string();
         return std::vector<Byte>(str.begin(), str.end());
     }
 
+    /*
+     * Name: hashToString
+     * Description: Converts a byte buffer into a lowercase hexadecimal string
+     * Parameters:
+     *   hash: Pointer to the hash bytes
+     *   length: Number of bytes in hash
+     * Returns: The hexadecimal representation of the hash
+     */
     std::string inline hashToString(const Byte* hash, size_t length)
     {
         std::ostringstream ss;
@@ -90,6 +104,13 @@ namespace shi
         return ss.str();
     }
 
+    /*
+     * Name: hashToString
+     * Description: Converts a hash byte vector into a lowercase hexadecimal string
+     * Parameters:
+     *   hash: The hash bytes to convert
+     * Returns: The hexadecimal representation of the hash
+     */
     std::string inline hashToString(const std::vector<Byte>& hash)
     {
         std::ostringstream ss;
@@ -98,6 +119,13 @@ namespace shi
         return ss.str();
     }
 
+    /*
+     * Name: sha256
+     * Description: Calculates the SHA-256 digest of a byte vector
+     * Parameters:
+     *   to_hash: The bytes to hash
+     * Returns: The digest split into its directory, file, and full hash parts
+     */
     inline HashRes sha256(const std::vector<Byte>& to_hash) 
     {
         unsigned char shaed[SHA256_DIGEST_LENGTH];
@@ -112,6 +140,13 @@ namespace shi
         };
     }
 
+    /*
+     * Name: readFile
+     * Description: Reads all remaining bytes from a seekable input stream
+     * Parameters:
+     *   is: The binary input stream to read
+     * Returns: The bytes read; an empty vector means an empty stream or a failed read
+     */
     inline std::vector<Byte> readFile(std::istream& is)
     {   
         is.seekg(0, std::ios::end);
@@ -133,6 +168,13 @@ namespace shi
         return content;
     }
 
+    /*
+     * Name: getFile
+     * Description: Loads a regular file and its binary contents
+     * Parameters:
+     *   f: The path of the file to load
+     * Returns: A File containing metadata and raw contents, or an empty File on failure
+     */
     inline File getFile(const fs::path& f)
     {
         if(!fs::is_regular_file(f)) return File();
@@ -162,11 +204,25 @@ namespace shi
         return new_file;
     }
 
+    /*
+     * Name: isShiDir
+     * Description: Checks whether a path contains a .shi directory
+     * Parameters:
+     *   p: The directory path to inspect
+     * Returns: True if p/.shi exists and is a directory, false otherwise
+     */
     inline bool isShiDir(const fs::path& p)
     {
         return fs::exists(p / SHI_DIR) && fs::is_directory(p / SHI_DIR);
     }
 
+    /*
+     * Name: compressShi
+     * Description: Compresses bytes using zlib
+     * Parameters:
+     *   data: The bytes to compress
+     * Returns: The compressed bytes, or an empty vector if compression fails
+     */
     inline std::vector<Byte> compressShi(const std::vector<Byte>& data)
     {
         if(data.size() > std::numeric_limits<uLong>::max())
@@ -274,6 +330,14 @@ namespace shi
         return true;
     }
 
+    /*
+     * Name: commit
+     * Description: Commits a Shi object to a branch (not implemented)
+     * Parameters:
+     *   shi: The Shi object to commit
+     *   branch: The branch name
+     * Returns: False because commit support is not implemented
+     */
     inline bool commit(const Shi& shi, const std::string&& branch)
     {
         std::string tree_path = branch + std::string(SHI_TREE_PATH);
@@ -284,6 +348,13 @@ namespace shi
         return false;
     }
 
+    /*
+     * Name: readStagingFile
+     * Description: Reads serialized staging records from the staging file
+     * Parameters:
+     *   staging_data: Output vector populated with staging records
+     * Returns: None
+     */
     inline void readStagingFile(std::vector<Stage>& staging_data)
     {
         // Read the staging file
@@ -318,6 +389,13 @@ namespace shi
         staging_input.close();
     }
 
+    /*
+     * Name: stage
+     * Description: Adds a Shi object to the staging file unless it is already staged
+     * Parameters:
+     *   shi: The Shi object to stage
+     * Returns: True if staging succeeds or the object is already staged, false otherwise
+     */
     inline bool stage(const Shi& shi)
     {
         std::vector<Stage> staging_data;
@@ -383,6 +461,13 @@ namespace shi
         return true;
     }
 
+    /*
+     * Name: catStage
+     * Description: Formats the current staging records for display
+     * Parameters:
+     *   None
+     * Returns: A human-readable representation of the staging records
+     */
     inline std::string catStage()
     {
         std::vector<Stage> staging_data;
@@ -397,6 +482,13 @@ namespace shi
         return oss.str();
     }
 
+    /*
+     * Name: blobbify
+     * Description: Builds a content-addressed Shi blob representation for a path
+     * Parameters:
+     *   p: The regular file path to convert into a blob
+     * Returns: The constructed Shi object, including its hash and storage path
+     */
     Shi blobbify(const fs::path& p)
     {
         Shi blob_obj;
@@ -422,6 +514,13 @@ namespace shi
         return blob_obj;
     }
 
+    /*
+     * Name: createTree
+     * Description: Creates the repository tree file
+     * Parameters:
+     *   branch: Branch name reserved for tree support
+     * Returns: True if the tree file is created successfully, false otherwise
+     */
     inline bool createTree(const std::string& branch)
     {
         (void)branch;
@@ -438,6 +537,13 @@ namespace shi
         return true;
     }
 
+    /*
+     * Name: init
+     * Description: Initializes the .shi object and staging directories
+     * Parameters:
+     *   arg: Repository base path
+     * Returns: True if initialization succeeds, false otherwise
+     */
     bool init(const std::string& arg = "")
     {
         logger::log(logger::level::INFO, "Initializing .shi directory.");
@@ -486,6 +592,13 @@ namespace shi
         return true;
     }
 
+    /*
+     * Name: add
+     * Description: Creates and stages a blob for a regular file
+     * Parameters:
+     *   arg: Path of the file to add
+     * Returns: True if the blob is stored and staged, false otherwise
+     */
     bool add(std::string arg)
     {
         if(arg.size() <= 0) 
@@ -523,6 +636,13 @@ namespace shi
         return true;
     }
 
+    /*
+     * Name: sync
+     * Description: Synchronizes staged file paths to the configured remote project
+     * Parameters:
+     *   project_name: Remote project directory name
+     * Returns: True if rsync succeeds, false otherwise
+     */
     bool sync(std::string project_name)
     {
         std::vector<Stage> stages;

@@ -13,6 +13,19 @@ namespace logger
         ERROR
     };
 
+    enum class ErrorCodes
+    {
+        INVALID_EXEC = 0,
+        INVALID_FLAG = 1,
+        INVALID_ARG = 2,
+    };
+
+    struct ErrorCode
+    {
+        ErrorCodes value;
+        std::string message;
+    };
+
     inline void log(level l, std::string_view msg)
     {
         switch (l)

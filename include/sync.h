@@ -1,18 +1,14 @@
 #pragma once
-#include <filesystem>
-#include <string_view>
+#include "common/common.h"
 #include <boost/process/v2/environment.hpp>
 #include <boost/process/v2/process.hpp>
 #include <boost/asio/io_context.hpp>
-#include <vector>
-#include <string>
 
 constexpr std::string_view remote_root = "steven@100.98.23.73:projects";
 
 namespace rsync
 {
     namespace bp = boost::process;
-    namespace fs = std::filesystem;
 
     inline bool rsync(std::string project_name, std::vector<fs::path> files) 
     { 
