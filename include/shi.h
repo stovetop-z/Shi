@@ -7,6 +7,7 @@
 #include <fstream>
 #include <limits>
 #include <sstream>
+#include <format>
 #include <openssl/sha.h>
 #include <zlib.h>
 #include <chrono>
@@ -69,6 +70,11 @@ namespace shi
         std::vector<Byte> full_hash;
     };
 
+    inline fs::path bytesToPath(const std::vector<Byte>& bytes)
+    {
+        return fs::path(reinterpret_cast<const char*>(bytes.data()));
+    }
+
     inline std::vector<Byte> pathToBytes(const fs::path& path)
     {
         const auto& str = path.string();
@@ -90,7 +96,6 @@ namespace shi
             ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
         return ss.str();
     }
-
 
     inline HashRes sha256(const std::vector<Byte>& to_hash) 
     {
@@ -278,10 +283,8 @@ namespace shi
         return false;
     }
 
-    inline bool stage(const Shi& shi)
+    inline void readStagingFile(std::vector<Stage>& staging_data)
     {
-        std::vector<Stage> staging_data;
-
         // Read the staging file
         std::ifstream staging_input(SHI_STAGING_PATH, std::ios::binary);
         while(staging_input)
@@ -304,11 +307,18 @@ namespace shi
                !staging_input.read(reinterpret_cast<char*>(stage.path.data()), path_size))
             {
                 logger::log(logger::level::ERROR, "Staging file contains an incomplete record.");
-                return false;
             }
             staging_data.push_back(stage);
         }
+
         staging_input.close();
+    }
+
+    inline bool stage(const Shi& shi)
+    {
+        std::vector<Stage> staging_data;
+
+        readStagingFile(staging_data);
 
         // Check for duplicates and add shi data
         const auto it = std::find_if(staging_data.begin(), staging_data.end(), [&shi](const Stage& s) {
@@ -323,9 +333,9 @@ namespace shi
 
         auto modFs = fs::status(shi.src_file.file_path);
         std::uint16_t mod = modFs.type() == fs::file_type::regular ? 0644 : 0755;
-        auto mtimeFs = fs::last_write_time(shi.src_file.file_path);
+        auto mtimeFs = std::chrono::file_clock::to_sys(fs::last_write_time(shi.src_file.file_path));
+        logger::log(logger::level::INFO, std::to_string(mtimeFs));
         std::int64_t mtime = static_cast<std::int64_t>(mtimeFs.time_since_epoch().count());
-
 
         staging_data.push_back(Stage{
             .mod = mod,
@@ -344,8 +354,7 @@ namespace shi
 
         for(const auto& stage : staging_data)
         {
-            if(stage.hash.size() > std::numeric_limits<std::uint32_t>::max() ||
-               stage.path.size() > std::numeric_limits<std::uint32_t>::max())
+            if(stage.hash.size() > std::numeric_limits<std::uint32_t>::max() || stage.path.size() > std::numeric_limits<std::uint32_t>::max())
             {
                 logger::log(logger::level::ERROR, "Staging record is too large.");
                 return false;
@@ -368,6 +377,20 @@ namespace shi
         staging_file.close();
 
         return true;
+    }
+
+    inline std::string catStage()
+    {
+        std::vector<Stage> staging_data;
+        readStagingFile(staging_data);
+        std::ostringstream oss;
+        for(const auto& stage : staging_data)
+        {
+            auto mtime = stage.mtime;
+
+            oss << stage.mod << " " << mtime << " " << hashToString(stage.hash) << " " << bytesToPath(stage.path).string() << std::endl;
+        }
+        return oss.str();
     }
 
     Shi blobbify(const fs::path& p)
