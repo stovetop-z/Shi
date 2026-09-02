@@ -37,6 +37,24 @@ int main(int argc, char** argv)
         return 0;
     }
 
+    if(command == "sync")
+    {
+        if(argc < 3)
+        {
+            std::cerr << "Usage: " << argv[0] << " sync <project_name>\n";
+            return 2;
+        }
+
+        if(shi::sync(argv[2]))
+        {
+            std::cout << "Successfully synced files to remote destination for project: " << argv[2] << std::endl;
+            return 0;
+        }
+
+        std::cerr << "Failed to sync files to remote destination for project: " << argv[2] << std::endl;
+        return 1;
+    }
+
     std::cerr << "Unknown command: " << command << '\n';
     return 2;
 }

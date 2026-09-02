@@ -28,7 +28,7 @@ namespace shi
     std::vector<Byte> BLOB_TYPE = {'b', 'l', 'o', 'b'};
     constexpr char PATH_DELIMITER = '/';
     constexpr char ARG_DELIMITER = ' ';
-    constexpr bool is_big_endian = std::endian::native == std::endian::big;  // C++20
+    constexpr bool is_big_endian = std::endian::native == std::endian::big;  
 
     using namespace args; 
 
@@ -55,6 +55,7 @@ namespace shi
         std::int64_t mtime{};
         std::vector<Byte> hash;
         std::vector<Byte> path;
+        Byte flag{};
     };
 
     struct TreeShi
@@ -209,14 +210,14 @@ namespace shi
         const fs::path parent_dir = shi_path.parent_path();
         const fs::path objects_root = parent_dir.parent_path();
 
-        // 1. Verify that the base objects repository exists
+        // Verify that the base objects repository exists
         if(!fs::exists(objects_root))
         {
             logger::log(logger::level::ERROR, logger::msgFormat("Base objects directory does not exist: " + objects_root.string(), __FUNCTION__, __FILE__, __LINE__));
             return false;
         }
 
-        // 2. Ensure the 2-character prefix parent directory exists
+        // Ensure the 2-character prefix parent directory exists
         if(!fs::exists(parent_dir))
         {
             std::error_code ec;
@@ -228,14 +229,14 @@ namespace shi
             }
         }
 
-        // 3. Skip if blob is already stored
+        // Skip if blob is already stored
         if(fs::exists(shi_path))
         {
             logger::log(logger::level::WARN, logger::msgFormat("Blob file already exists at: " + shi_path.string(), __FUNCTION__, __FILE__, __LINE__));
             return true;
         }
 
-        // 4. Compress content
+        // Compress content
         const auto& raw_content = blob_obj.src_file.raw_content;
         std::vector<Byte> compressed_data = compressShi(raw_content);
         
@@ -246,7 +247,7 @@ namespace shi
             return false;
         }
 
-        // 5. Write to file
+        // Write to file
         std::ofstream blob_file(shi_path, std::ios::binary);
         if(!blob_file.is_open())
         {
@@ -292,17 +293,20 @@ namespace shi
             Stage stage;
             std::uint32_t hash_size{};
             std::uint32_t path_size{};
+            Byte flag{};
 
             if(!staging_input.read(reinterpret_cast<char*>(&stage.mod), sizeof(stage.mod)) ||
                !staging_input.read(reinterpret_cast<char*>(&stage.mtime), sizeof(stage.mtime)) ||
                !staging_input.read(reinterpret_cast<char*>(&hash_size), sizeof(hash_size)) ||
-               !staging_input.read(reinterpret_cast<char*>(&path_size), sizeof(path_size)))
+               !staging_input.read(reinterpret_cast<char*>(&path_size), sizeof(path_size)) ||
+               !staging_input.read(reinterpret_cast<char*>(&flag), sizeof(flag)))
             {
                 break;
             }
 
             stage.hash.resize(hash_size);
             stage.path.resize(path_size);
+            stage.flag = flag;
             if(!staging_input.read(reinterpret_cast<char*>(stage.hash.data()), hash_size) ||
                !staging_input.read(reinterpret_cast<char*>(stage.path.data()), path_size))
             {
@@ -340,7 +344,8 @@ namespace shi
             .mod = mod,
             .mtime = mtime,
             .hash = shi.blob_hash,
-            .path = pathToBytes(shi.src_file.file_path)
+            .path = pathToBytes(shi.src_file.file_path),
+            .flag = Byte(0)
         });
 
         // Write to staging file
@@ -518,10 +523,20 @@ namespace shi
         return true;
     }
 
-    bool sync(std::string project_name, const std::vector<std::string>& args)
+    bool sync(std::string project_name)
     {
-        std::vector<fs::path> files_to_sync(args.begin(), args.end());
-        if(rsync::rsync(project_name, files_to_sync))
+        std::vector<Stage> stages;
+        readStagingFile(stages);
+        std::vector<fs::path> files_to_sync;
+
+        for(const auto& stage  : stages)
+        {
+            fs::path file = bytesToPath(stage.path);
+            logger::log(logger::level::INFO, logger::msgFormat("Syncing file: " + file.string(), __FUNCTION__, __FILE__, __LINE__));
+            files_to_sync.push_back(file);
+        }
+
+        if(!rsync::rsync(project_name, files_to_sync))
         {
             logger::log(logger::level::ERROR, logger::msgFormat("Failed to sync files to remote destination.", __FUNCTION__, __FILE__, __LINE__));
             return false;
