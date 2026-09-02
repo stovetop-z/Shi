@@ -334,7 +334,6 @@ namespace shi
         auto modFs = fs::status(shi.src_file.file_path);
         std::uint16_t mod = modFs.type() == fs::file_type::regular ? 0644 : 0755;
         auto mtimeFs = std::chrono::file_clock::to_sys(fs::last_write_time(shi.src_file.file_path));
-        logger::log(logger::level::INFO, std::to_string(mtimeFs));
         std::int64_t mtime = static_cast<std::int64_t>(mtimeFs.time_since_epoch().count());
 
         staging_data.push_back(Stage{

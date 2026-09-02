@@ -1,18 +1,42 @@
 #include "include/shi.h"
 #include <iostream>
 
-int main(int args, char** argv)
+int main(int argc, char** argv)
 {
-    shi::init(".");
-
-    if(shi::add(argv[2]))
+    if(argc < 2)
     {
-        std::cout << "Successfully added file to .shi/objects." << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <init|add> [path]\n";
+        return 2;
     }
-    else
+
+    const std::string command = argv[1];
+    if(command == "init")
+        return shi::init(".") ? 0 : 1;
+
+    if(command == "add")
     {
+        if(argc < 3)
+        {
+            std::cerr << "Usage: " << argv[0] << " add <path>\n";
+            return 2;
+        }
+
+        if(shi::add(argv[2]))
+        {
+            std::cout << "Successfully added file to .shi/objects." << std::endl;
+            return 0;
+        }
+
         std::cerr << "Failed to add file to .shi/objects." << std::endl;
+        return 1;
     }
 
-    return 0;
+    if(command == "cat-stage")
+    {
+        std::cout << shi::catStage() << std::endl;
+        return 0;
+    }
+
+    std::cerr << "Unknown command: " << command << '\n';
+    return 2;
 }
