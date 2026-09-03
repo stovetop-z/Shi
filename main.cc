@@ -56,6 +56,7 @@ int main(int argc, char** argv)
 
         if(command == "add")
         {
+            readIgnoreFile(".ignore", ignore_patterns);
             if(!hasArgumentCount(argc, 3, program, command)) return 2;
 
             if(!shi::add(argv[2]))
