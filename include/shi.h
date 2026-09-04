@@ -50,12 +50,6 @@ namespace shi
         Byte flag{};
     };
 
-    struct TreeShi
-    {
-        std::vector<Shi*> shis;
-        std::vector<Byte> branch;
-    };
-
     struct HashRes
     {
         std::string dir;
@@ -73,6 +67,18 @@ namespace shi
     inline fs::path bytesToPath(const std::vector<Byte>& bytes)
     {
         return fs::path(std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+    }
+
+    /*
+     * Name: stringToBytes
+     * Description: Converts a string into a byte vector
+     * Parameters:
+     *   str: The string to convert
+     * Returns: The string text represented as bytes
+     */
+    inline std::vector<Byte> stringToBytes(const std::string& str)
+    {
+        return std::vector<Byte>(str.begin(), str.end());
     }
 
     /*
@@ -509,8 +515,8 @@ namespace shi
         logger::log(logger::level::INFO, "Creating blob for: " + f.file_path.string());
 
         blob_obj.src_file = f;
+        blob_obj.type = BLOB_TYPE;
 
-        blob_obj.type = fs::is_directory(p) ? TREE_TYPE : BLOB_TYPE;
         std::string header(blob_obj.type.begin(), blob_obj.type.end());
         header += std::to_string(f.size) + '\0';
 
@@ -555,26 +561,15 @@ namespace shi
      *   arg: Repository base path
      * Returns: True if initialization succeeds, false otherwise
      */
-    bool init(const std::string& arg = "")
+    bool init()
     {
         logger::log(logger::level::INFO, "Initializing .shi directory.");
-        // 1. Check if argument is empty
-        if(arg.empty()) 
-        {
-            logger::log(
-                logger::level::ERROR, 
-                logger::msgFormat("No arguments passed to init.", __FUNCTION__, __FILE__, __LINE__)
-            );
-            return false;
-        }
 
-        // 2. Resolve path using arg if intended (or use current_path if empty)
-        fs::path base_path = arg;
-        fs::path init_path = base_path / SHI_OBJECTS_DIR;
-        fs::path staging_dir = base_path / fs::path(SHI_STAGING_PATH).parent_path();
+        fs::path init_path = SHI_OBJECTS_DIR;
+        fs::path staging_dir =  fs::path(SHI_STAGING_PATH).parent_path();
 
 
-        // 3. Create directories with error_code to avoid uncaught exceptions
+        // Create directories with error_code to avoid uncaught exceptions
         std::error_code ec;
         fs::create_directories(init_path, ec);
 
@@ -618,29 +613,48 @@ namespace shi
             return false;
         }
 
+        std::vector<fs::path> paths{fs::relative(fs::path(arg))};
         if(arg == ".")
         {
-            // Recursive search of files in parent to all children files excluding the .shi folder
-        }
+            for(const auto& entry : fs::recursive_directory_iterator(fs::current_path()))
+            {
+                logger::log(logger::level::INFO, logger::msgFormat("Inspecting path: " + entry.path().string(), __FUNCTION__, __FILE__, __LINE__));
+                std::string entry_path_str = entry.path().string();
+                bool skip = [entry_path_str](std::vector<std::string>& patterns) {
+                    for(const auto& pattern : patterns)
+                    {
+                        if(entry_path_str.find(pattern) != std::string::npos)
+                        {
+                            logger::log(logger::level::INFO, logger::msgFormat("Skipping path due to ignore pattern: " + entry_path_str, __FUNCTION__, __FILE__, __LINE__));
+                            return true;
+                        }
+                    }
+                    return false;
+                }(ignore_patterns);
 
-        // `arg` is already one command-line argument, so do not split it on
-        // spaces; filenames containing spaces are valid paths.
-        std::vector<fs::path> paths{fs::relative(fs::path(arg))};
+                if(skip) continue;
+
+                if(fs::is_directory(entry.path())) continue;
+                
+                if(!add(entry.path().string()))
+                {
+                    logger::log(logger::level::ERROR, logger::msgFormat("Failed to add file: " + entry.path().string(), __FUNCTION__, __FILE__, __LINE__));
+                    return false;
+                }
+
+                paths.push_back(entry.path());
+            }
+        }
 
         for(const auto& path : paths)
         {
-            if(!fs::is_regular_file(path))
-            {
-                logger::log(logger::level::ERROR, logger::msgFormat("Path is not a regular file: " + path.string(), __FUNCTION__, __FILE__, __LINE__));
-                return false;
-            }
-
             Shi shi = blobbify(path);
             if(!createBlobFile(shi))
             {
                 logger::log(logger::level::ERROR, logger::msgFormat("Failed to create blob file for path: " + path.string(), __FUNCTION__, __FILE__, __LINE__));
                 return false;
             }
+
             stage(shi);
         }
 

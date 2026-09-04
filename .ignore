@@ -1,5 +1,7 @@
 .vscode/
 bin/
+build/
 .env
 .gitignore
+.gitignore/
 .git/
