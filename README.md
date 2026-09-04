@@ -64,6 +64,14 @@ Paths containing spaces are supported when quoted:
 ./build/bin/shi add "path/to/my file.txt"
 ```
 
+There is also recursive add using the "." after `add` to add your entire workspace:
+
+```sh
+shi add .
+```
+
+If you want to ignore files and folders, use a .ignore file. It will automatically be read. By default, the `.shi/` folder will be ignored.
+
 Display the current staging records:
 
 ```sh
@@ -140,9 +148,7 @@ compile.py                      macOS/Clang build helper
 
 ## Roadmap
 
-- implement recursive `add .` while excluding `.shi`;
 - finish tree objects and commits;
 - add history, checkout/read, compare, pull, and push commands;
-- make the remote destination configurable;
 - improve staging-file portability and version its format; and
 - add automated tests for hashing, compression, staging, and synchronization.
